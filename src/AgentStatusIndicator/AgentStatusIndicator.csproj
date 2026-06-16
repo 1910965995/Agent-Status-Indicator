@@ -9,6 +9,7 @@
     <RootNamespace>AgentStatusIndicator</RootNamespace>
     <AssemblyName>AgentStatusIndicator</AssemblyName>
     <SelfContained>true</SelfContained>
+    <CetCompat>false</CetCompat>
   </PropertyGroup>
 
   <!-- Workaround: .NET 10 SDK Roslyn csc.exe requires CET support (Windows 11+).
