@@ -22,6 +22,7 @@ public class StatusMonitorService : IDisposable
     private string? _hookTask;
     private DateTime? _hookStartedAt;
     private AgentStatus _lastNotifiedStatus = AgentStatus.Idle;
+    private static readonly TimeSpan HookStaleTimeout = TimeSpan.FromSeconds(10);
 
     public event EventHandler<StatusChangedEventArgs>? StatusChanged;
 
@@ -136,30 +137,32 @@ public class StatusMonitorService : IDisposable
             // Let hook decide
         }
 
-        // Priority 3: Hook completed/error (only when session is quiet)
-        if (_hookStatus == AgentStatus.Completed)
+        // Priority 3: Hook status (if fresh — completed/error/running)
+        // If hook file hasn't been updated in 10s, consider it stale and fall through to idle/session logic.
+        var hookFresh = !IsHookStale();
+
+        if (hookFresh && _hookStatus == AgentStatus.Completed)
         {
             if (_lastNotifiedStatus != AgentStatus.Completed)
                 Notify(AgentStatus.Completed, _hookTask, _hookStartedAt);
             return;
         }
 
-        if (_hookStatus == AgentStatus.Error)
+        if (hookFresh && _hookStatus == AgentStatus.Error)
         {
             if (_lastNotifiedStatus != AgentStatus.Error)
                 Notify(AgentStatus.Error, _hookTask, _hookStartedAt);
             return;
         }
 
-        // Priority 4: Hook running (session just went idle, keep running briefly)
-        if (_hookStatus == AgentStatus.Running)
+        if (hookFresh && _hookStatus == AgentStatus.Running)
         {
             if (_lastNotifiedStatus != AgentStatus.Running)
                 Notify(AgentStatus.Running, _hookTask, _hookStartedAt);
             return;
         }
 
-        // Priority 5: Nothing active → idle
+        // Priority 4: Nothing active → idle
         if (_lastNotifiedStatus != AgentStatus.Idle)
             Notify(AgentStatus.Idle, null, null);
     }
@@ -173,6 +176,10 @@ public class StatusMonitorService : IDisposable
         _sessionFilePath != null &&
         File.Exists(_sessionFilePath) &&
         (DateTime.Now - File.GetLastWriteTime(_sessionFilePath)) < TimeSpan.FromSeconds(5);
+
+    private bool IsHookStale() =>
+        !File.Exists(_filePath) ||
+        (DateTime.Now - _lastHookWrite) >= HookStaleTimeout;
 
     private void Notify(AgentStatus status, string? task, DateTime? startedAt)
     {
