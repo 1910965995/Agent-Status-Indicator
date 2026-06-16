@@ -9,12 +9,21 @@ public class StatusMonitorService : IDisposable
     private readonly string _filePath;
     private readonly string _watchDir;
     private FileSystemWatcher? _hookWatcher;
-    private FileSystemWatcher? _sessionWatcher;
-    private Timer? _sessionTimer;
+    private Timer? _pollTimer;
     private bool _disposed;
+
+    // Session file tracking
+    private string? _sessionFilePath;
+    private DateTime _lastSessionWrite = DateTime.MinValue;
+    private DateTime _lastHookWrite = DateTime.MinValue;
+
+    // Current known statuses
     private AgentStatus _hookStatus = AgentStatus.Idle;
-    private DateTime _lastSessionActivity = DateTime.MinValue;
-    private static readonly TimeSpan SessionActiveWindow = TimeSpan.FromSeconds(3);
+    private string? _hookTask;
+    private DateTime? _hookStartedAt;
+    private AgentStatus _lastNotifiedStatus = AgentStatus.Idle;
+
+    private static readonly TimeSpan SessionRunningWindow = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan SessionIdleTimeout = TimeSpan.FromSeconds(5);
 
     public event EventHandler<StatusChangedEventArgs>? StatusChanged;
@@ -29,16 +38,23 @@ public class StatusMonitorService : IDisposable
 
     public void Start()
     {
-        // Read initial state from hook file
+        // Find the session file to monitor
+        _sessionFilePath = FindNewestSessionFile();
+        if (_sessionFilePath != null)
+            _lastSessionWrite = File.GetLastWriteTime(_sessionFilePath);
+
+        // Read initial hook state
         var initial = ReadCurrentStatus();
         if (initial != null)
         {
-            var status = ParseAgentStatus(initial.Status);
-            _hookStatus = status;
-            NotifyStatusChanged(status, initial.Task, ParseDateTime(initial.StartedAt));
+            _hookStatus = ParseAgentStatus(initial.Status);
+            _hookTask = initial.Task;
+            _hookStartedAt = ParseDateTime(initial.StartedAt);
+            _lastHookWrite = File.GetLastWriteTime(_filePath);
+            Notify(_hookStatus, _hookTask, _hookStartedAt);
         }
 
-        // Watch the hook status file
+        // Watch the hook status file (event-driven, fast)
         if (Directory.Exists(_watchDir))
         {
             _hookWatcher = new FileSystemWatcher(_watchDir)
@@ -51,46 +67,21 @@ public class StatusMonitorService : IDisposable
             _hookWatcher.EnableRaisingEvents = true;
         }
 
-        // Watch the Claude session directory for activity
-        var sessionDir = FindClaudeSessionDir();
-        if (sessionDir != null && Directory.Exists(sessionDir))
-        {
-            _sessionWatcher = new FileSystemWatcher(sessionDir)
-            {
-                Filter = "*.jsonl",
-                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
-                IncludeSubdirectories = false
-            };
-            _sessionWatcher.Changed += OnSessionActivity;
-            _sessionWatcher.Created += OnSessionActivity;
-            _sessionWatcher.EnableRaisingEvents = true;
-        }
-
-        // Periodic check: if session was recently active, ensure status is "running"
-        _sessionTimer = new Timer(OnSessionTimerTick, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        // Polling timer: checks session file activity every second
+        _pollTimer = new Timer(OnPollTick, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
     }
 
     public StatusFileData? ReadCurrentStatus()
     {
         try
         {
-            if (!File.Exists(_filePath))
-                return null;
-
+            if (!File.Exists(_filePath)) return null;
             var json = File.ReadAllText(_filePath);
-            if (string.IsNullOrWhiteSpace(json))
-                return null;
-
+            if (string.IsNullOrWhiteSpace(json)) return null;
             return JsonSerializer.Deserialize<StatusFileData>(json);
         }
-        catch (JsonException)
-        {
-            return null;
-        }
-        catch (IOException)
-        {
-            return null;
-        }
+        catch (JsonException) { return null; }
+        catch (IOException) { return null; }
     }
 
     private void OnHookFileChanged(object sender, FileSystemEventArgs e)
@@ -99,104 +90,108 @@ public class StatusMonitorService : IDisposable
         var data = ReadCurrentStatus();
         if (data == null) return;
 
-        var status = ParseAgentStatus(data.Status);
-        _hookStatus = status;
+        _hookStatus = ParseAgentStatus(data.Status);
+        _hookTask = data.Task;
+        _hookStartedAt = ParseDateTime(data.StartedAt);
+        _lastHookWrite = File.GetLastWriteTime(_filePath);
 
-        // Hook says completed/error → respect it, override session activity
-        if (status == AgentStatus.Completed || status == AgentStatus.Error)
+        // Hook says completed/error → always respect it
+        if (_hookStatus == AgentStatus.Completed || _hookStatus == AgentStatus.Error)
         {
-            NotifyStatusChanged(status, data.Task, ParseDateTime(data.StartedAt));
+            Notify(_hookStatus, _hookTask, _hookStartedAt);
         }
         // Hook says running → show running
-        else if (status == AgentStatus.Running)
+        else if (_hookStatus == AgentStatus.Running)
         {
-            NotifyStatusChanged(AgentStatus.Running, data.Task, ParseDateTime(data.StartedAt));
+            Notify(AgentStatus.Running, _hookTask, _hookStartedAt);
         }
-        // Hook says idle → let session timer decide if we're actually idle
-        else
-        {
-            CheckSessionIdle();
-        }
+        // Hook says idle → let poll timer decide
     }
 
-    private void OnSessionActivity(object sender, FileSystemEventArgs e)
+    private void OnPollTick(object? state)
     {
-        // Session file changed → Claude is active (thinking, writing, using tools)
-        _lastSessionActivity = DateTime.Now;
-
-        // If hook hasn't set a specific status, override to running
-        if (_hookStatus == AgentStatus.Idle)
+        // Re-find session file if lost (handles new sessions)
+        if (_sessionFilePath == null || !File.Exists(_sessionFilePath))
         {
-            NotifyStatusChanged(AgentStatus.Running, "Claude 工作中...", null);
+            _sessionFilePath = FindNewestSessionFile();
         }
-    }
 
-    private void OnSessionTimerTick(object? state)
-    {
-        CheckSessionIdle();
-    }
-
-    private void CheckSessionIdle()
-    {
-        // If hook says running/completed/error, don't override
-        if (_hookStatus != AgentStatus.Idle) return;
-
-        // If session was recently active, keep showing running
-        if (DateTime.Now - _lastSessionActivity < SessionIdleTimeout)
+        // Check session file modification time
+        if (_sessionFilePath != null && File.Exists(_sessionFilePath))
         {
-            NotifyStatusChanged(AgentStatus.Running, "Claude 工作中...", null);
+            try
+            {
+                var sessionWrite = File.GetLastWriteTime(_sessionFilePath);
+                if (sessionWrite > _lastSessionWrite)
+                {
+                    _lastSessionWrite = sessionWrite;
+                }
+            }
+            catch { /* file might be locked */ }
+        }
+
+        var sessionActive = (DateTime.Now - _lastSessionWrite) < SessionIdleTimeout;
+        var sessionRecentlyActive = (DateTime.Now - _lastSessionWrite) < SessionRunningWindow;
+
+        // Priority: hook completed/error > session active > hook idle
+        if (_hookStatus == AgentStatus.Completed || _hookStatus == AgentStatus.Error)
+        {
+            // Show completed/error, but check if it's stale (> 10s)
+            // MainWindow handles the hold time via auto-hide timer
+            if (_lastNotifiedStatus != _hookStatus)
+                Notify(_hookStatus, _hookTask, _hookStartedAt);
             return;
         }
 
-        // Truly idle
-        NotifyStatusChanged(AgentStatus.Idle, null, null);
+        // Session file recently modified → Claude is working
+        if (sessionRecentlyActive)
+        {
+            if (_lastNotifiedStatus != AgentStatus.Running)
+                Notify(AgentStatus.Running, "Claude 工作中...", null);
+            return;
+        }
+
+        // Session file not recently modified + hook says running → keep running
+        if (_hookStatus == AgentStatus.Running && sessionActive)
+        {
+            if (_lastNotifiedStatus != AgentStatus.Running)
+                Notify(AgentStatus.Running, _hookTask, _hookStartedAt);
+            return;
+        }
+
+        // Nothing active → idle
+        if (_lastNotifiedStatus != AgentStatus.Idle)
+            Notify(AgentStatus.Idle, null, null);
     }
 
-    /// <summary>
-    /// Find the Claude session directory for the current project.
-    /// Looks for the most recently modified directory in ~/.claude/projects/
-    /// that matches the current working directory.
-    /// </summary>
-    private static string? FindClaudeSessionDir()
+    private void Notify(AgentStatus status, string? task, DateTime? startedAt)
+    {
+        _lastNotifiedStatus = status;
+        StatusChanged?.Invoke(this, new StatusChangedEventArgs(status, task, startedAt));
+    }
+
+    private static string? FindNewestSessionFile()
     {
         try
         {
             var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             var projectsDir = Path.Combine(homeDir, ".claude", "projects");
-
             if (!Directory.Exists(projectsDir)) return null;
 
-            // Find the newest .jsonl file across all project directories
-            string? newestFile = null;
+            string? newest = null;
             var newestTime = DateTime.MinValue;
 
             foreach (var dir in Directory.GetDirectories(projectsDir))
             {
-                foreach (var file in Directory.GetFiles(dir, "*.jsonl"))
+                foreach (var f in Directory.GetFiles(dir, "*.jsonl"))
                 {
-                    var lastWrite = File.GetLastWriteTime(file);
-                    if (lastWrite > newestTime)
-                    {
-                        newestTime = lastWrite;
-                        newestFile = file;
-                    }
+                    var t = File.GetLastWriteTime(f);
+                    if (t > newestTime) { newestTime = t; newest = f; }
                 }
             }
-
-            if (newestFile != null)
-                return Path.GetDirectoryName(newestFile);
+            return newest;
         }
-        catch
-        {
-            // Permission errors etc — just skip
-        }
-
-        return null;
-    }
-
-    private void NotifyStatusChanged(AgentStatus status, string? task, DateTime? startedAt)
-    {
-        StatusChanged?.Invoke(this, new StatusChangedEventArgs(status, task, startedAt));
+        catch { return null; }
     }
 
     private static AgentStatus ParseAgentStatus(string status) =>
@@ -216,7 +211,6 @@ public class StatusMonitorService : IDisposable
         if (_disposed) return;
         _disposed = true;
         _hookWatcher?.Dispose();
-        _sessionWatcher?.Dispose();
-        _sessionTimer?.Dispose();
+        _pollTimer?.Dispose();
     }
 }
