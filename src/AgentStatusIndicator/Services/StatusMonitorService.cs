@@ -23,9 +23,6 @@ public class StatusMonitorService : IDisposable
     private DateTime? _hookStartedAt;
     private AgentStatus _lastNotifiedStatus = AgentStatus.Idle;
 
-    private static readonly TimeSpan SessionRunningWindow = TimeSpan.FromSeconds(3);
-    private static readonly TimeSpan SessionIdleTimeout = TimeSpan.FromSeconds(5);
-
     public event EventHandler<StatusChangedEventArgs>? StatusChanged;
 
     public string FilePath => _filePath;
@@ -95,74 +92,87 @@ public class StatusMonitorService : IDisposable
         _hookStartedAt = ParseDateTime(data.StartedAt);
         _lastHookWrite = File.GetLastWriteTime(_filePath);
 
-        // Hook says completed/error → always respect it
-        if (_hookStatus == AgentStatus.Completed || _hookStatus == AgentStatus.Error)
-        {
-            Notify(_hookStatus, _hookTask, _hookStartedAt);
-        }
-        // Hook says running → show running
-        else if (_hookStatus == AgentStatus.Running)
+        // If session is currently active, keep showing running
+        if (IsSessionActive())
         {
             Notify(AgentStatus.Running, _hookTask, _hookStartedAt);
+            return;
         }
-        // Hook says idle → let poll timer decide
+
+        // No session activity → respect hook status
+        Notify(_hookStatus, _hookTask, _hookStartedAt);
     }
 
     private void OnPollTick(object? state)
     {
         // Re-find session file if lost (handles new sessions)
         if (_sessionFilePath == null || !File.Exists(_sessionFilePath))
-        {
             _sessionFilePath = FindNewestSessionFile();
-        }
 
-        // Check session file modification time
+        // Update session file modification time
         if (_sessionFilePath != null && File.Exists(_sessionFilePath))
         {
             try
             {
                 var sessionWrite = File.GetLastWriteTime(_sessionFilePath);
                 if (sessionWrite > _lastSessionWrite)
-                {
                     _lastSessionWrite = sessionWrite;
-                }
             }
-            catch { /* file might be locked */ }
+            catch { }
         }
 
-        var sessionActive = (DateTime.Now - _lastSessionWrite) < SessionIdleTimeout;
-        var sessionRecentlyActive = (DateTime.Now - _lastSessionWrite) < SessionRunningWindow;
-
-        // Priority: hook completed/error > session active > hook idle
-        if (_hookStatus == AgentStatus.Completed || _hookStatus == AgentStatus.Error)
-        {
-            // Show completed/error, but check if it's stale (> 10s)
-            // MainWindow handles the hold time via auto-hide timer
-            if (_lastNotifiedStatus != _hookStatus)
-                Notify(_hookStatus, _hookTask, _hookStartedAt);
-            return;
-        }
-
-        // Session file recently modified → Claude is working
-        if (sessionRecentlyActive)
+        // Priority 1: Session file active within 3s → Claude is working NOW
+        if (IsSessionRecentlyActive())
         {
             if (_lastNotifiedStatus != AgentStatus.Running)
                 Notify(AgentStatus.Running, "Claude 工作中...", null);
             return;
         }
 
-        // Session file not recently modified + hook says running → keep running
-        if (_hookStatus == AgentStatus.Running && sessionActive)
+        // Priority 2: Session active within 5s → still recently active
+        if (IsSessionActive())
+        {
+            if (_lastNotifiedStatus == AgentStatus.Running) return; // already showing running
+            // Let hook decide
+        }
+
+        // Priority 3: Hook completed/error (only when session is quiet)
+        if (_hookStatus == AgentStatus.Completed)
+        {
+            if (_lastNotifiedStatus != AgentStatus.Completed)
+                Notify(AgentStatus.Completed, _hookTask, _hookStartedAt);
+            return;
+        }
+
+        if (_hookStatus == AgentStatus.Error)
+        {
+            if (_lastNotifiedStatus != AgentStatus.Error)
+                Notify(AgentStatus.Error, _hookTask, _hookStartedAt);
+            return;
+        }
+
+        // Priority 4: Hook running (session just went idle, keep running briefly)
+        if (_hookStatus == AgentStatus.Running)
         {
             if (_lastNotifiedStatus != AgentStatus.Running)
                 Notify(AgentStatus.Running, _hookTask, _hookStartedAt);
             return;
         }
 
-        // Nothing active → idle
+        // Priority 5: Nothing active → idle
         if (_lastNotifiedStatus != AgentStatus.Idle)
             Notify(AgentStatus.Idle, null, null);
     }
+
+    private bool IsSessionRecentlyActive() =>
+        _sessionFilePath != null &&
+        File.Exists(_sessionFilePath) &&
+        (DateTime.Now - File.GetLastWriteTime(_sessionFilePath)) < TimeSpan.FromSeconds(3);
+
+    private bool IsSessionActive() =>
+        _sessionFilePath != null &&
+        File.Exists(_sessionFilePath) &&
+        (DateTime.Now - File.GetLastWriteTime(_sessionFilePath)) < TimeSpan.FromSeconds(5);
 
     private void Notify(AgentStatus status, string? task, DateTime? startedAt)
     {
