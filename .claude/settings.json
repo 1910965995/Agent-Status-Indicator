@@ -2,7 +2,6 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
@@ -13,7 +12,6 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
@@ -37,7 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash src/hooks/status-writer.sh idle"
+            "command": "bash src/hooks/status-writer.sh completed"
           }
         ]
       }
