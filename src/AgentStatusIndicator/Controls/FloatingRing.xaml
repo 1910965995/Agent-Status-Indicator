@@ -1,0 +1,23 @@
+<UserControl x:Class="AgentStatusIndicator.Controls.FloatingRing"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="RingControl">
+    <Grid>
+        <Ellipse x:Name="Ring"
+                 Width="{Binding ElementName=RingControl, Path=RingDiameter}"
+                 Height="{Binding ElementName=RingControl, Path=RingDiameter}"
+                 Stroke="{Binding ElementName=RingControl, Path=RingBrush}"
+                 StrokeThickness="{Binding ElementName=RingControl, Path=StrokeThickness}"
+                 RenderTransformOrigin="0.5,0.5">
+            <Ellipse.RenderTransform>
+                <ScaleTransform x:Name="RingScale" ScaleX="1" ScaleY="1" />
+            </Ellipse.RenderTransform>
+            <Ellipse.Effect>
+                <DropShadowEffect x:Name="RingGlow"
+                                  BlurRadius="0"
+                                  ShadowDepth="0"
+                                  Opacity="0" />
+            </Ellipse.Effect>
+        </Ellipse>
+    </Grid>
+</UserControl>
