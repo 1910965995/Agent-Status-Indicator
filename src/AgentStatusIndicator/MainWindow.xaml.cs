@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -19,8 +20,8 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var statusFilePath = Path.Combine(homeDir, ".claude", "agent-status", "status.json");
+        var config = LoadConfig();
+        var statusFilePath = ResolvePath(config.StatusFilePath);
 
         _monitor = new StatusMonitorService(statusFilePath);
         _monitor.StatusChanged += OnStatusChanged;
@@ -32,6 +33,29 @@ public partial class MainWindow : Window
             Left = workArea.Right - Width - 20;
             Top = workArea.Bottom - Height - 60;
         };
+    }
+
+    private static AppConfig LoadConfig()
+    {
+        var configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "appsettings.json");
+        if (!File.Exists(configPath))
+            return new AppConfig();
+
+        try
+        {
+            var json = File.ReadAllText(configPath);
+            return JsonSerializer.Deserialize<AppConfig>(json) ?? new AppConfig();
+        }
+        catch
+        {
+            return new AppConfig();
+        }
+    }
+
+    private static string ResolvePath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return "";
+        return Environment.ExpandEnvironmentVariables(path);
     }
 
     private void OnRingClick(object sender, MouseButtonEventArgs e)
