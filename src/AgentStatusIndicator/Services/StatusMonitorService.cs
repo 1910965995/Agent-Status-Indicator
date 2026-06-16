@@ -22,7 +22,6 @@ public class StatusMonitorService : IDisposable
     private string? _hookTask;
     private DateTime? _hookStartedAt;
     private AgentStatus _lastNotifiedStatus = AgentStatus.Idle;
-    private static readonly TimeSpan HookStaleTimeout = TimeSpan.FromSeconds(10);
 
     public event EventHandler<StatusChangedEventArgs>? StatusChanged;
 
@@ -93,8 +92,8 @@ public class StatusMonitorService : IDisposable
         _hookStartedAt = ParseDateTime(data.StartedAt);
         _lastHookWrite = File.GetLastWriteTime(_filePath);
 
-        // If session is currently active, keep showing running
-        if (IsSessionActive())
+        // If session is currently writing, keep showing running (overrides completed)
+        if (IsSessionRecentlyActive())
         {
             Notify(AgentStatus.Running, _hookTask, _hookStartedAt);
             return;
@@ -122,7 +121,7 @@ public class StatusMonitorService : IDisposable
             catch { }
         }
 
-        // Priority 1: Session file active within 3s → Claude is working NOW
+        // Priority 1: Session file active within 3s → Claude is writing NOW
         if (IsSessionRecentlyActive())
         {
             if (_lastNotifiedStatus != AgentStatus.Running)
@@ -130,39 +129,31 @@ public class StatusMonitorService : IDisposable
             return;
         }
 
-        // Priority 2: Session active within 5s → still recently active
-        if (IsSessionActive())
-        {
-            if (_lastNotifiedStatus == AgentStatus.Running) return; // already showing running
-            // Let hook decide
-        }
-
-        // Priority 3: Hook status (if fresh — completed/error/running)
-        // If hook file hasn't been updated in 10s, consider it stale and fall through to idle/session logic.
-        var hookFresh = !IsHookStale();
-
-        if (hookFresh && _hookStatus == AgentStatus.Completed)
+        // Priority 2: Hook completed (only when session is quiet)
+        if (_hookStatus == AgentStatus.Completed)
         {
             if (_lastNotifiedStatus != AgentStatus.Completed)
                 Notify(AgentStatus.Completed, _hookTask, _hookStartedAt);
             return;
         }
 
-        if (hookFresh && _hookStatus == AgentStatus.Error)
+        // Priority 3: Hook error
+        if (_hookStatus == AgentStatus.Error)
         {
             if (_lastNotifiedStatus != AgentStatus.Error)
                 Notify(AgentStatus.Error, _hookTask, _hookStartedAt);
             return;
         }
 
-        if (hookFresh && _hookStatus == AgentStatus.Running)
+        // Priority 4: Hook says running → keep running (no timeout, allows deep thinking)
+        if (_hookStatus == AgentStatus.Running)
         {
             if (_lastNotifiedStatus != AgentStatus.Running)
                 Notify(AgentStatus.Running, _hookTask, _hookStartedAt);
             return;
         }
 
-        // Priority 4: Nothing active → idle
+        // Priority 5: Hook idle + no session activity → idle
         if (_lastNotifiedStatus != AgentStatus.Idle)
             Notify(AgentStatus.Idle, null, null);
     }
@@ -171,15 +162,6 @@ public class StatusMonitorService : IDisposable
         _sessionFilePath != null &&
         File.Exists(_sessionFilePath) &&
         (DateTime.Now - File.GetLastWriteTime(_sessionFilePath)) < TimeSpan.FromSeconds(3);
-
-    private bool IsSessionActive() =>
-        _sessionFilePath != null &&
-        File.Exists(_sessionFilePath) &&
-        (DateTime.Now - File.GetLastWriteTime(_sessionFilePath)) < TimeSpan.FromSeconds(5);
-
-    private bool IsHookStale() =>
-        !File.Exists(_filePath) ||
-        (DateTime.Now - _lastHookWrite) >= HookStaleTimeout;
 
     private void Notify(AgentStatus status, string? task, DateTime? startedAt)
     {
