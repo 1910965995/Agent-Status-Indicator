@@ -188,20 +188,53 @@ public class StatusMonitorService : IDisposable
             var projectsDir = Path.Combine(homeDir, ".claude", "projects");
             if (!Directory.Exists(projectsDir)) return null;
 
-            string? newest = null;
-            var newestTime = DateTime.MinValue;
+            // Try project config first (set by init-status.sh)
+            var configFile = Path.Combine(homeDir, ".claude", "agent-status", "project.json");
+            if (File.Exists(configFile))
+            {
+                try
+                {
+                    var configJson = File.ReadAllText(configFile);
+                    var config = System.Text.Json.JsonSerializer.Deserialize<ProjectConfig>(configJson);
+                    if (config != null && !string.IsNullOrEmpty(config.EncodedName))
+                    {
+                        var projectDir = Path.Combine(projectsDir, config.EncodedName);
+                        if (Directory.Exists(projectDir))
+                        {
+                            string? newest = null;
+                            var newestTime = DateTime.MinValue;
+                            foreach (var f in Directory.GetFiles(projectDir, "*.jsonl"))
+                            {
+                                var t = File.GetLastWriteTime(f);
+                                if (t > newestTime) { newestTime = t; newest = f; }
+                            }
+                            if (newest != null) return newest;
+                        }
+                    }
+                }
+                catch { /* fall through */ }
+            }
 
+            // Fallback: search all project directories
+            string? fallback = null;
+            var fallbackTime = DateTime.MinValue;
             foreach (var dir in Directory.GetDirectories(projectsDir))
             {
                 foreach (var f in Directory.GetFiles(dir, "*.jsonl"))
                 {
                     var t = File.GetLastWriteTime(f);
-                    if (t > newestTime) { newestTime = t; newest = f; }
+                    if (t > fallbackTime) { fallbackTime = t; fallback = f; }
                 }
             }
-            return newest;
+            return fallback;
         }
         catch { return null; }
+    }
+
+    private record ProjectConfig
+    {
+        public string? ProjectDir { get; init; }
+        public string? EncodedName { get; init; }
     }
 
     private static AgentStatus ParseAgentStatus(string status) =>
