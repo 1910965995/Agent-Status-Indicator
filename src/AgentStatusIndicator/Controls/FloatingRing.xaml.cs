@@ -17,6 +17,10 @@ public partial class FloatingRing : UserControl
         DependencyProperty.Register(nameof(RingDiameter), typeof(double), typeof(FloatingRing),
             new PropertyMetadata(40.0));
 
+    public static readonly DependencyProperty RingStrokeThicknessProperty =
+        DependencyProperty.Register(nameof(RingStrokeThickness), typeof(double), typeof(FloatingRing),
+            new PropertyMetadata(4.0));
+
     public AgentStatus Status
     {
         get => (AgentStatus)GetValue(StatusProperty);
@@ -27,6 +31,12 @@ public partial class FloatingRing : UserControl
     {
         get => (double)GetValue(RingDiameterProperty);
         set => SetValue(RingDiameterProperty, value);
+    }
+
+    public double RingStrokeThickness
+    {
+        get => (double)GetValue(RingStrokeThicknessProperty);
+        set => SetValue(RingStrokeThicknessProperty, value);
     }
 
     public Brush RingBrush { get; private set; } = new SolidColorBrush(Color.FromRgb(0x4c, 0xaf, 0x50));

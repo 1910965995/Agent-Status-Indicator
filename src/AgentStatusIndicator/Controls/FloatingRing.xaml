@@ -7,7 +7,7 @@
                  Width="{Binding ElementName=RingControl, Path=RingDiameter}"
                  Height="{Binding ElementName=RingControl, Path=RingDiameter}"
                  Stroke="{Binding ElementName=RingControl, Path=RingBrush}"
-                 StrokeThickness="{Binding ElementName=RingControl, Path=StrokeThickness}"
+                 StrokeThickness="{Binding ElementName=RingControl, Path=RingStrokeThickness}"
                  RenderTransformOrigin="0.5,0.5">
             <Ellipse.RenderTransform>
                 <ScaleTransform x:Name="RingScale" ScaleX="1" ScaleY="1" />
