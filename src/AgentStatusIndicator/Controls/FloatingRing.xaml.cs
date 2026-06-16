@@ -70,6 +70,7 @@ public partial class FloatingRing : UserControl
         };
         RingBrush = new SolidColorBrush(color);
         Ring.Stroke = RingBrush;
+        RingGlow.Color = color;  // glow matches ring color
     }
 
     private void StartBreathing(AgentStatus status)
@@ -77,45 +78,48 @@ public partial class FloatingRing : UserControl
         _currentAnimation?.Stop();
         _currentAnimation = null;
 
-        var (duration, scaleMax, glowMax, glowOpacity) = status switch
+        // Parameters: (halfCycle, scaleMax, glowBlur, glowOpacity, ringOpacityMin)
+        var (halfCycle, scaleMax, glowMax, glowOpacity, opacityMin) = status switch
         {
-            AgentStatus.Idle => (TimeSpan.FromSeconds(3), 1.05, 0.0, 0.0),
-            AgentStatus.Running => (TimeSpan.FromSeconds(1.5), 1.18, 20.0, 0.5),
-            AgentStatus.Completed => (TimeSpan.FromSeconds(2), 1.12, 16.0, 0.4),
-            AgentStatus.Error => (TimeSpan.FromSeconds(1), 1.15, 18.0, 0.5),
-            _ => (TimeSpan.FromSeconds(3), 1.05, 0.0, 0.0)
+            AgentStatus.Idle     => (TimeSpan.FromSeconds(1.5), 1.10, 0.0,  0.0, 0.5),
+            AgentStatus.Running  => (TimeSpan.FromSeconds(0.75), 1.20, 20.0, 0.5, 0.4),
+            AgentStatus.Completed => (TimeSpan.FromSeconds(1.0), 1.14, 16.0, 0.4, 0.5),
+            AgentStatus.Error    => (TimeSpan.FromSeconds(0.5), 1.18, 18.0, 0.5, 0.4),
+            _ => (TimeSpan.FromSeconds(1.5), 1.10, 0.0, 0.0, 0.5)
         };
 
-        var halfDuration = TimeSpan.FromMilliseconds(duration.TotalMilliseconds / 2);
+        var sb = new Storyboard { RepeatBehavior = RepeatBehavior.Forever };
 
-        var scaleAnim = new DoubleAnimation(1.0, scaleMax, halfDuration)
+        // Scale X animation
+        var scaleX = new DoubleAnimation(1.0, scaleMax, halfCycle) { AutoReverse = true };
+        Storyboard.SetTarget(scaleX, RingScale);
+        Storyboard.SetTargetProperty(scaleX, new PropertyPath(ScaleTransform.ScaleXProperty));
+        sb.Children.Add(scaleX);
+
+        // Scale Y animation (same as X for uniform scaling)
+        var scaleY = new DoubleAnimation(1.0, scaleMax, halfCycle) { AutoReverse = true };
+        Storyboard.SetTarget(scaleY, RingScale);
+        Storyboard.SetTargetProperty(scaleY, new PropertyPath(ScaleTransform.ScaleYProperty));
+        sb.Children.Add(scaleY);
+
+        // Ring opacity animation (the "breathing" brightness)
+        var opacity = new DoubleAnimation(1.0, opacityMin, halfCycle) { AutoReverse = true };
+        Storyboard.SetTargetProperty(opacity, new PropertyPath(UIElement.OpacityProperty));
+        sb.Children.Add(opacity);
+
+        // Glow BlurRadius animation
+        if (glowMax > 0)
         {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever
-        };
+            var glow = new DoubleAnimation(0, glowMax, halfCycle) { AutoReverse = true };
+            Storyboard.SetTarget(glow, RingGlow);
+            Storyboard.SetTargetProperty(glow, new PropertyPath(DropShadowEffect.BlurRadiusProperty));
+            sb.Children.Add(glow);
 
-        var glowAnim = new DoubleAnimation(0, glowMax, halfDuration)
-        {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever
-        };
-
-        var glowOpacityAnim = new DoubleAnimation(0, glowOpacity, halfDuration)
-        {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever
-        };
-
-        var sb = new Storyboard();
-        Storyboard.SetTarget(scaleAnim, RingScale);
-        Storyboard.SetTargetProperty(scaleAnim, new PropertyPath(ScaleTransform.ScaleXProperty));
-        Storyboard.SetTarget(glowAnim, RingGlow);
-        Storyboard.SetTargetProperty(glowAnim, new PropertyPath(DropShadowEffect.BlurRadiusProperty));
-        Storyboard.SetTarget(glowOpacityAnim, RingGlow);
-        Storyboard.SetTargetProperty(glowOpacityAnim, new PropertyPath(DropShadowEffect.OpacityProperty));
-        sb.Children.Add(scaleAnim);
-        sb.Children.Add(glowAnim);
-        sb.Children.Add(glowOpacityAnim);
+            var glowOp = new DoubleAnimation(0, glowOpacity, halfCycle) { AutoReverse = true };
+            Storyboard.SetTarget(glowOp, RingGlow);
+            Storyboard.SetTargetProperty(glowOp, new PropertyPath(DropShadowEffect.OpacityProperty));
+            sb.Children.Add(glowOp);
+        }
 
         _currentAnimation = sb;
         sb.Begin(this);
