@@ -92,8 +92,8 @@ public class StatusMonitorService : IDisposable
         _hookStartedAt = ParseDateTime(data.StartedAt);
         _lastHookWrite = File.GetLastWriteTime(_filePath);
 
-        // If session is currently writing, keep showing running (overrides completed)
-        if (IsSessionRecentlyActive())
+        // Session writing → running, but don't override a completed/error that Stop just set
+        if (IsSessionRecentlyActive() && _hookStatus != AgentStatus.Completed && _hookStatus != AgentStatus.Error)
         {
             Notify(AgentStatus.Running, _hookTask, _hookStartedAt);
             return;
@@ -121,8 +121,9 @@ public class StatusMonitorService : IDisposable
             catch { }
         }
 
-        // Priority 1: Session file active within 3s → Claude is writing NOW
-        if (IsSessionRecentlyActive())
+        // Priority 1: Session active → Claude is writing NOW.
+        // But DON'T override a completed/error from Stop hook (session writes happen during cleanup too).
+        if (IsSessionRecentlyActive() && _hookStatus != AgentStatus.Completed && _hookStatus != AgentStatus.Error)
         {
             if (_lastNotifiedStatus != AgentStatus.Running)
                 Notify(AgentStatus.Running, "Claude 工作中...", null);
