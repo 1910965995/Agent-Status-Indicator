@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AgentStatusIndicator\AgentStatusIndicator.csproj" />
+  </ItemGroup>
+
+  <!-- Workaround: .NET 10 SDK Roslyn csc.exe requires CET support (Windows 11+).
+       On Windows 10, use csc.dll via dotnet exec wrapper to bypass CET check. -->
+  <PropertyGroup>
+    <CscToolPath>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', '.tools'))</CscToolPath>
+    <CscToolExe>csc.cmd</CscToolExe>
+  </PropertyGroup>
+
+</Project>
