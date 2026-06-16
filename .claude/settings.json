@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash src/hooks/status-writer.sh running \"$CLAUDE_TOOL_NAME\""
+            "command": "bash ~/.claude/tools/status-writer.sh running \"$CLAUDE_TOOL_NAME\""
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash src/hooks/status-writer.sh running \"$CLAUDE_TOOL_NAME\""
+            "command": "bash ~/.claude/tools/status-writer.sh running \"$CLAUDE_TOOL_NAME\""
           }
         ]
       }
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash src/hooks/status-writer.sh running \"notification\""
+            "command": "bash ~/.claude/tools/status-writer.sh running \"notification\""
           }
         ]
       }
@@ -35,7 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash src/hooks/status-writer.sh completed"
+            "command": "bash ~/.claude/tools/status-writer.sh completed"
           }
         ]
       }
