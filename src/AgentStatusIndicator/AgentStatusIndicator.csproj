@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>AgentStatusIndicator</RootNamespace>
+    <AssemblyName>AgentStatusIndicator</AssemblyName>
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+
+  <!-- Workaround: .NET 10 SDK Roslyn csc.exe requires CET support (Windows 11+).
+       On Windows 10, use csc.dll via dotnet exec wrapper to bypass CET check. -->
+  <PropertyGroup>
+    <CscToolPath>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', '.tools'))</CscToolPath>
+    <CscToolExe>csc.cmd</CscToolExe>
+  </PropertyGroup>
+
+</Project>
