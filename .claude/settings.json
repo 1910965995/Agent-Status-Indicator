@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash src/hooks/status-writer.sh completed \"$CLAUDE_TOOL_NAME\""
+            "command": "bash src/hooks/status-writer.sh running \"$CLAUDE_TOOL_NAME\""
           }
         ]
       }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash src/hooks/status-writer.sh error \"notification\""
+            "command": "bash src/hooks/status-writer.sh running \"notification\""
           }
         ]
       }
